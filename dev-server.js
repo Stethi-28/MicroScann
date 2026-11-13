@@ -56,7 +56,7 @@ function runApi(handlerFile, req, res, urlPath) {
   });
 }
 
-http
+const server = http
   .createServer((req, res) => {
     let urlPath = decodeURIComponent(req.url.split("?")[0]);
 
@@ -87,6 +87,7 @@ http
       res.writeHead(200, {
         "Content-Type": TYPES[path.extname(file).toLowerCase()] || "application/octet-stream",
         "Cache-Control": "no-cache",
+        "Content-Length": data.length,
         // Cross-origin isolation lets the model use several processor cores (same headers as vercel.json).
         "Cross-Origin-Opener-Policy": "same-origin",
         "Cross-Origin-Embedder-Policy": "credentialless",
@@ -94,9 +95,21 @@ http
       res.end(data);
     });
   })
-  .listen(PORT, () => {
+  .on("error", function (e) {
+    // Port taken (usually another copy of the app is still running): try the next one.
+    if (e.code === "EADDRINUSE" && this._tryPort < PORT + 10) {
+      console.log(`Port ${this._tryPort} is already in use (another copy of the app may be running). Trying ${this._tryPort + 1}…`);
+      this._tryPort++;
+      this.listen(this._tryPort);
+    } else {
+      throw e;
+    }
+  })
+  .on("listening", function () {
     const { usingDatabase } = require("./lib/store");
-    console.log(`Microplastic Bench running at http://localhost:${PORT}`);
+    console.log(`Microplastic Bench running at http://localhost:${this.address().port}`);
     console.log(usingDatabase ? "History: saved in the Postgres database (DATABASE_URL)." : "History: saved locally in data/history.json.");
     if (process.env.APP_PASSWORD) console.log("History is protected by APP_PASSWORD.");
   });
+server._tryPort = PORT;
+server.listen(PORT);

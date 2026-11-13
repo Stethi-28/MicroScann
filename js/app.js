@@ -50,8 +50,8 @@ const COLOR_SW={"black":"#1b1b1b","white / clear":"#f3f3f0","grey":"#8c8c8c","re
 function analyze(){
   if(!S.base)return Promise.resolve();
   return M.ready.then(()=>M.session?analyzeYolo():undefined).catch(e=>{
-    console.error(e);
-    showMsg("Detection failed: "+esc(e?.message||String(e))+" Reload the page with Ctrl + Shift + R and try again.");
+    console.error(e);$("#readout").innerHTML="";
+    if(S.base&&!S.live)showFailed();
   });
 }
 
@@ -210,6 +210,14 @@ function loadFrom(src,w,h,name,example,maxDim){
   const c=document.createElement("canvas");c.width=W;c.height=H;const x=c.getContext("2d",{willReadFrequently:true});x.drawImage(src,0,0,W,H);
   S.base=c;S.W=W;S.H=H;S.rgba=x.getImageData(0,0,W,H).data;S.scale=w/W;S.origW=w;S.origH=h;S.name=name;S.example=example;
   $("#imgName").textContent=name;view.hidden=false;$("#stage").hidden=false;
+  if(!S.live){
+    // Show the photo straight away; outlines and counts appear when the analysis finishes.
+    S.parts=[];S.lab=null;S.labIdx=null;S.sel=-1;
+    if(S.outline){S.outline.width=W;S.outline.height=H;}
+    drawView();
+    showBusy();
+    $("#btnSave").hidden=true;
+  }
   return analyze();
 }
 function loadFile(file){
@@ -254,7 +262,7 @@ const MODEL_URL="model/yolov8s.onnx";
 const NAMED={fiber:"#ff2e88",fibre:"#ff2e88",filament:"#b18cff",film:"#29d3f0",fragment:"#ffb020",granule:"#9be15d",pellet:"#9be15d",bead:"#9be15d",foam:"#ff7a45",microbead:"#9be15d"};
 const PALETTE=["#ff2e88","#ffb020","#29d3f0","#9be15d","#b18cff","#ff7a45","#4dabf7","#f783ac","#ffd43b","#69db7c","#e599f7","#63e6be"];
 // conf: minimum confidence for a detection (0.25 = YOLO default). iou: overlap for merging duplicates.
-const M={ready:null,session:null,name:"",task:"detect",names:[],imgsz:640,conf:0.25,iou:0.45,tok:0,lb:null};
+const M={ready:null,loadPct:0,session:null,name:"",task:"detect",names:[],imgsz:640,conf:0.25,iou:0.45,tok:0,lb:null};
 // Processor with several cores by default (graphics card only with ?gpu=1); one core in compatibility mode.
 // when the page is cross-origin isolated (the server sends the COOP/COEP headers, see vercel.json).
 let WANT_GPU=false;
@@ -265,9 +273,10 @@ const SAFE=(()=>{try{const q=new URLSearchParams(location.search);if(q.has("fast
 function enterSafeMode(reason){
   console.warn("Switching to compatibility mode:",reason);
   let already=false;try{already=localStorage.getItem(SAFE_KEY)==="1";localStorage.setItem(SAFE_KEY,"1");}catch(e){}
-  if(SAFE||already){showMsg("Detection isn't working in this browser. "+esc(String(reason))+" Try updating the browser, or use Chrome or Edge.");return;}
-  try{sessionStorage.setItem("microscan-switched","1");}catch(e){}
-  showMsg("Switching to compatibility mode for this browser…");
+  if(SAFE||already){if(S.base&&!S.live)showFailed();return;}
+  try{sessionStorage.setItem("microscan-switched","1");
+    if(S.base&&!S.live){sessionStorage.setItem("microscan-pending",S.base.toDataURL("image/jpeg",0.9));sessionStorage.setItem("microscan-pending-name",S.name||"Image");}}catch(e){}
+  if(S.base&&!S.live)showBusy();
   setTimeout(()=>location.reload(),600);
 }
 // Rejects if a promise takes longer than ms (e.g. a graphics driver that hangs).
@@ -304,13 +313,77 @@ function buildModelClasses(){
   CLS=c;
 }
 function showMsg(html){const m=$("#liveMsg");m.innerHTML=html;m.hidden=!html;}
+// Count box states: a spinner with "Analyzing…" while the model loads or works; a tap-to-retry note if it fails.
+function showBusy(){$("#readout").innerHTML=`<div class="busy"><span class="spin"></span>Analyzing…</div>`;}
+function showFailed(){
+  $("#readout").innerHTML=`<button class="busy retry" id="btnRetry" type="button">Couldn't analyze. Tap to try again.</button>`;
+  $("#btnRetry").onclick=retryModel;
+}
+/* ---------- model download: in pieces with retries, kept in the browser's cache ---------- */
+const MODEL_CACHE="microscan-model";
+function setLoadPct(p){M.loadPct=p;const el=document.querySelector("#readout .busy em");if(el)el.textContent=` ${p}%`;}
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+async function fetchRetry(url,opts,tries=5){
+  let last;
+  for(let i=0;i<tries;i++){
+    try{const r=await fetch(url,{cache:"no-store",...opts});if(r.ok||r.status===206)return r;
+      if(r.status===404)throw Object.assign(new Error(`${url} was not found. Check that the file is in the model folder.`),{fatal:true});
+      last=new Error("Server error "+r.status);}
+    catch(e){if(e.fatal)throw e;last=e;}
+    await sleep(800*2**i);
+  }
+  throw new Error("The model download keeps failing ("+(last?.message||"network error")+"). Check the internet connection, then press Retry.");
+}
+async function downloadModel(url){
+  let cache=null;try{if(self.caches)cache=await caches.open(MODEL_CACHE);}catch(e){}
+  // Ask for the first byte to learn the size and version (ETag) of the model on the server.
+  let total=0,tag="",ranges=false,whole=null;
+  try{
+    const probe=await fetchRetry(url,{headers:{Range:"bytes=0-0"}},3);
+    const cr=probe.headers.get("content-range");
+    ranges=probe.status===206&&!!cr;
+    if(ranges){total=+cr.split("/")[1];tag=probe.headers.get("etag")||String(total);try{await probe.arrayBuffer();}catch(e){}}
+    else{whole=await probe.arrayBuffer();total=whole.byteLength;tag=probe.headers.get("etag")||String(total);} // server sent the whole file
+  }catch(e){
+    // Offline or server unreachable: use the saved copy if there is one.
+    const any=cache&&await cache.match(url,{ignoreSearch:true});
+    if(any){setLoadPct(100);return any.arrayBuffer();}
+    throw e;
+  }
+  const key=url+"?v="+encodeURIComponent(tag);
+  if(cache){try{const hit=await cache.match(key);if(hit){const b=await hit.arrayBuffer();if(b.byteLength===total||!total){setLoadPct(100);return b;}}}catch(e){}}
+  let buf;
+  if(whole){buf=whole;setLoadPct(100);}
+  else if(ranges&&total){
+    // Download in 4 MB pieces; a dropped connection only repeats one piece.
+    const all=new Uint8Array(total),PIECE=4*1024*1024;
+    for(let s=0;s<total;s+=PIECE){
+      const e=Math.min(total,s+PIECE)-1;
+      const r=await fetchRetry(url,{headers:{Range:`bytes=${s}-${e}`}});
+      const part=new Uint8Array(await r.arrayBuffer());
+      if(r.status===200&&part.length===total){all.set(part);break;} // server ignored the range: got the whole file
+      if(part.length!==e-s+1)throw new Error("The model download was incomplete. Press Retry.");
+      all.set(part,s);setLoadPct(Math.floor((e+1)/total*100));
+    }
+    buf=all.buffer;
+  }else{
+    const r=await fetchRetry(url);buf=await r.arrayBuffer();setLoadPct(100);
+  }
+  if(cache){try{for(const k of await cache.keys())if(k.url.split("?")[0].endsWith(url.split("/").pop()))await cache.delete(k);
+    await cache.put(key,new Response(buf,{headers:{"Content-Type":"application/octet-stream"}}));}catch(e){}}
+  return buf;
+}
+function retryModel(){
+  M.loadPct=0;
+  if(!M.session)M.ready=loadModel(MODEL_URL);
+  if(S.base&&!S.live){showBusy();analyze();}
+}
+
 async function loadModel(url){
   showMsg("");
   try{
     await ensureOrt();
-    const r=await fetch(url);
-    if(!r.ok)throw new Error(`${url} was not found. Check that the file is in the model folder.`);
-    const buf=await r.arrayBuffer();
+    const buf=await downloadModel(url);
     const meta=onnxMeta(buf);
     const isz=(meta.imgsz||"").match(/\d+/g);const imgsz=isz?+isz[0]:640;
     let sess=null,out=null;M.backend="cpu";
@@ -338,14 +411,18 @@ async function loadModel(url){
     M.session=null;
     if(!SAFE&&/took too long|wasm|worker|thread/i.test(e?.message||"")){enterSafeMode(e?.message||e);return;}
     const local=location.protocol==="file:";
-    let why=esc(e?.message||String(e));if(!/[.!?]$/.test(why))why+=".";
-    showMsg("The YOLOv8 model couldn't be loaded. "+why+(local?" Open the app through the local server (run <code>npm start</code>, then go to http://localhost:5173) instead of opening index.html directly.":""));
+    console.error("Model could not be loaded:",e);
+    if(S.base&&!S.live)showFailed();
   }
 }
 // Load the model once at startup; analysis waits for it.
 M.ready=loadModel(MODEL_URL);
+// Re-open a photo that was waiting when the page switched to compatibility mode.
+try{const pend=sessionStorage.getItem("microscan-pending");if(pend){const nm=sessionStorage.getItem("microscan-pending-name")||"Image";
+  sessionStorage.removeItem("microscan-pending");sessionStorage.removeItem("microscan-pending-name");
+  const im=new Image();im.onload=()=>loadFrom(im,im.naturalWidth,im.naturalHeight,nm,false);im.src=pend;}}catch(e){}
 M.ready.then(()=>{try{if(sessionStorage.getItem("microscan-switched")){sessionStorage.removeItem("microscan-switched");
-  if(M.session)toast("Switched to compatibility mode for this browser. Choose your image again.");}}catch(e){}});
+  }}catch(e){}});
 // Remove a model remembered by older versions of this app.
 try{indexedDB.deleteDatabase("microplastic-bench");}catch(e){}
 
@@ -593,7 +670,8 @@ document.addEventListener("keydown",e=>{if(e.key!=="Escape")return;if(!$("#histV
 function onUncaught(msg){
   if(!msg||/ResizeObserver/.test(msg))return;
   if(!SAFE&&(!M.session||/\[object (Error)?Event\]/.test(msg))){enterSafeMode("The fast mode didn't start in this browser ("+msg+").");return;}
-  showMsg("Something went wrong: "+esc(msg)+" Reload the page with Ctrl + Shift + R.");
+  console.error("Unexpected error:",msg);
+  if(S.base&&!S.live&&!S.parts.length)showFailed();
 }
 window.addEventListener("error",e=>onUncaught(e.message||(e.error&&e.error.message)||String(e.error||"")));
 window.addEventListener("unhandledrejection",e=>{const r=e.reason;onUncaught(r?.message||(r instanceof Event?"[object Event]":String(r||"")));});

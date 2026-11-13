@@ -1,7 +1,7 @@
 {
-  "name": "microplastic-bench",
+  "name": "microscan-yolov8",
   "version": "1.1.0",
-  "description": "Microplastic detection and classification in the browser with a YOLO11 model, plus a saved history (Vercel functions + Postgres).",
+  "description": "Microplastic detection and classification in the browser with a YOLOv8 model, plus a saved history (Vercel functions + Postgres).",
   "private": true,
   "scripts": {
     "start": "node dev-server.js"

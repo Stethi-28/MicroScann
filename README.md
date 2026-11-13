@@ -1,6 +1,6 @@
 # Microplastic Bench
 
-Detects microplastic particles in a live camera feed or an uploaded image, and classifies them as **fiber, film or fragment** with your trained YOLO11 model (`model/yolo11s.onnx`).
+Detects microplastic particles in a live camera feed or an uploaded image, and classifies them as **fiber, film or fragment** with your trained YOLOv8 model (`model/yolov8s.onnx`).
 
 Detection runs in the browser. A small backend (`api/history.js`) saves analyses to a **History**: on Vercel in a Postgres database, locally in a file. There is no build step.
 
@@ -11,8 +11,8 @@ microplastic-bench/
 ├── index.html                  Page markup (toolbar, viewer, count box)
 ├── css/style.css               Styling (dark theme, toolbar, viewer, phone layout)
 ├── js/app.js                   All logic: camera, image loading, rule-based detection,
-│                               YOLO11 model loading and inference, drawing the overlay
-├── model/yolo11s.onnx          Your YOLO11s model (fiber, film, fragment), exported to ONNX
+│                               YOLOv8 model loading and inference, drawing the overlay
+├── model/yolov8s.onnx          Your YOLOv8s model (fiber, film, fragment), exported to ONNX
 ├── vendor/onnxruntime-web/     ONNX Runtime Web 1.20.1 (runs the model offline; WebGPU + multi-core builds)
 ├── api/history.js              History API (save, list, open, delete), runs as a Vercel function
 ├── lib/store.js                History storage: Postgres when DATABASE_URL is set, else data/history.json
@@ -49,7 +49,7 @@ The **Live Server** extension also works: right-click `index.html` → **Open wi
 - **Save**: stores the current result (annotated image, counts per class, and each particle's class, confidence, position and size) in the History. Shown when an image or frozen frame is analysed.
 - **History**: lists saved analyses, newest first. Click one to view it; **Delete** (press twice) removes it.
 
-The YOLO11 model loads automatically when the app opens. An image uploaded before it has finished loading is analysed as soon as it is ready.
+The YOLOv8 model loads automatically when the app opens. An image uploaded before it has finished loading is analysed as soon as it is ready.
 
 ## Live speed
 
@@ -58,7 +58,7 @@ The YOLO11 model loads automatically when the app opens. An image uploaded befor
 - Add `?gpu=1` to the address to try the **graphics card (WebGPU)**; on some laptops and phones it gives wrong or no results, so it is off by default.
 - If detection fails or freezes, the app switches that browser to **compatibility mode** (one core). Force it with `?safe=1`; turn it off again with `?fast=1`.
 - Multi-core needs the `Cross-Origin-Opener-Policy` / `Cross-Origin-Embedder-Policy` headers; `vercel.json` and `dev-server.js` send them.
-- For more speed, a YOLO11**n** model or exporting at a smaller size (`imgsz=480`) helps, at some cost in accuracy.
+- For more speed, a smaller model (YOLOv8n) or exporting at a smaller size (`imgsz=480`) helps, at some cost in accuracy.
 
 ## History backend
 
@@ -108,7 +108,7 @@ $env:DATABASE_URL="postgres://user:password@host/dbname"; npm start
 
 ## Updating the model
 
-After retraining, export the new `best.pt` to ONNX and replace `model/yolo11s.onnx` with it (keep the same file name, or change `MODEL_URL` in `js/app.js`):
+After retraining, export the new `best.pt` to ONNX and replace `model/yolov8s.onnx` with it (keep the same file name, or change `MODEL_URL` in `js/app.js`):
 
 ```bash
 pip install ultralytics
@@ -131,4 +131,4 @@ Class names and input size are read from the file.
 
   | Model | Classes | mAP50 | mAP50-95 | Precision | Recall |
   |---|---|---|---|---|---|
-  | `yolo11s.onnx` | fiber, film, fragment | 0.52 | 0.34 | 0.53 | 0.58 |
+  | `yolov8s.onnx` | fiber, film, fragment | 0.52 | 0.35 | 0.46 | 0.65 |

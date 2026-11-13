@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS analyses (
   id          SERIAL PRIMARY KEY,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   image_name  TEXT,                 -- uploaded file name, or "Live camera" / "Capture …"
-  model       TEXT,                 -- model file used, e.g. yolo11s.onnx
+  model       TEXT,                 -- model file used, e.g. yolov8s.onnx
   um_per_px   REAL,                 -- scale used for sizes (micrometres per pixel)
   total       INTEGER NOT NULL,     -- number of particles counted
   counts      JSONB   NOT NULL,     -- per class, e.g. {"Fiber": 3, "Film": 1, "Fragment": 5}
