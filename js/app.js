@@ -198,7 +198,7 @@ function refresh(rebuild){
   const u=S.umPerPx*S.scale;
   if(S.base){const inc=included(),cnt={};for(const k in CLS)cnt[k]=0;for(const p of inc)cnt[p.cls]++;
     $("#readout").innerHTML=`<div class="total"><b>${inc.length}</b><span>${inc.length===1?"particle":"particles"}</span></div><ul>${Object.entries(CLS).filter(([k])=>Object.keys(CLS).length<=6||cnt[k]>0).map(([k,v])=>`<li><i style="background:${v.color}"></i>${v.name}<b>${cnt[k]}</b></li>`).join("")}</ul>`;
-    $("#fps").textContent=S.live&&fps?`· ${fps<10?fps.toFixed(1):fps.toFixed(0)} detections/s`:"";}
+    $("#fps").textContent="";}
   const has=!!S.base&&!S.live;
   $("#btnSave").hidden=!(has&&M.session);
 
