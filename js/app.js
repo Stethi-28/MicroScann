@@ -497,21 +497,48 @@ async function analyzeYolo(){
 
 /* ---------- live detection ---------- */
 let stream=null,liveTimer=null,lastUi=0,fpsT=0,fpsN=0,fps=0;
+const CAM_KEY="microscan-camera";
+function savedCam(){try{return localStorage.getItem(CAM_KEY)||"";}catch(e){return"";}}
+// Plain-language reason for a camera error.
+function cameraProblem(err){
+  const n=err&&err.name;
+  if(!window.isSecureContext)return "The camera only works on https:// addresses or http://localhost.";
+  if(n==="NotAllowedError"||n==="SecurityError")return "Camera access is blocked for this page. Click the camera icon in the address bar (or the browser's site settings), choose Allow, then press Live again.";
+  if(n==="NotFoundError"||n==="DevicesNotFoundError")return "No camera was found. Check that the camera is plugged in and switched on, then press Live again.";
+  if(n==="NotReadableError"||n==="TrackStartError")return "The camera is being used by another program (for example the microscope's own software, the Camera app, Zoom or Teams). Close that program, then press Live again.";
+  return "The camera couldn't start ("+(err?.message||n||"unknown error")+"). Reconnect the camera, then press Live again.";
+}
+async function openCamera(deviceId){
+  const md=navigator.mediaDevices;
+  if(!md?.getUserMedia)throw Object.assign(new Error("Camera not supported"),{name:"NotSupportedError"});
+  const base=deviceId?{deviceId:{exact:deviceId}}:{facingMode:"environment"};
+  // Try a sharp picture first; external and microscope cameras often reject size requests, so fall back to the camera's own settings.
+  const tries=[{...base,width:{ideal:1920},height:{ideal:1080}},base,deviceId?{deviceId}:true];
+  let last;
+  for(const video of tries){
+    try{return await md.getUserMedia({audio:false,video});}
+    catch(e){last=e;if(e.name==="NotAllowedError"||e.name==="SecurityError")break;}
+  }
+  // The remembered camera may have been unplugged: try any camera.
+  if(deviceId&&last&&(last.name==="NotFoundError"||last.name==="OverconstrainedError")){try{return await md.getUserMedia({audio:false,video:true});}catch(e){last=e;}}
+  throw last;
+}
 async function startLive(deviceId){
   const msg=$("#liveMsg");msg.hidden=true;
   try{
-    if(!navigator.mediaDevices?.getUserMedia)throw new Error("no api");
-    if(stream)stream.getTracks().forEach(t=>t.stop());
-    stream=await navigator.mediaDevices.getUserMedia({audio:false,video:deviceId?{deviceId:{exact:deviceId},width:{ideal:1920},height:{ideal:1080}}:{facingMode:"environment",width:{ideal:1920},height:{ideal:1080}}});
+    if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}
+    stream=await openCamera(deviceId||savedCam());
     const v=$("#video");v.srcObject=stream;await v.play();
     S.live=true;S.example=false;$("#liveTag").hidden=false;$("#liveCtl").hidden=false;$("#btnLive").classList.replace("primary","stop");$("#btnLive").innerHTML=STOP_BTN;
     cancelAnimationFrame(liveRaf);liveRaf=requestAnimationFrame(liveDraw);
+    // Camera menu: lists every camera (built-in, USB, microscope) once access is allowed; the choice is remembered.
     try{const devs=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==="videoinput");const sel=$("#camSel");const cur=stream.getVideoTracks()[0]?.getSettings().deviceId;
-      sel.innerHTML=devs.map((d,i)=>`<option value="${esc(d.deviceId)}"${d.deviceId===cur?" selected":""}>${esc(d.label||"Camera "+(i+1))}</option>`).join("");$("#camPick").hidden=devs.length<2;}catch(e){}
+      sel.innerHTML=devs.map((d,i)=>`<option value="${esc(d.deviceId)}"${d.deviceId===cur?" selected":""}>${esc(d.label||"Camera "+(i+1))}</option>`).join("");$("#camPick").hidden=devs.length<2;
+      try{if(cur)localStorage.setItem(CAM_KEY,cur);}catch(e){}}catch(e){}
     clearTimeout(liveTimer);liveTick();
   }catch(err){
-    S.live=false;
-    msg.textContent="Camera access was refused or no camera was found. Allow camera access for this page in your browser settings, then try again. The camera only works on http://localhost or https:// addresses.";
+    S.live=false;console.warn("Camera error:",err);
+    msg.textContent=cameraProblem(err);
     msg.hidden=false;
   }
 }
