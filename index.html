@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<link rel="stylesheet" href="css/style.css?v=21">
+<link rel="stylesheet" href="css/style.css?v=26">
 </head>
 <body>
 <main>
@@ -36,7 +36,7 @@
       <div class="frame">
         <canvas id="view" width="10" height="10" aria-label="Image with detected particles" hidden></canvas>
         <div class="readout" id="readout" aria-live="polite"></div>
-        <div class="livebadge" id="liveTag" hidden><i></i>LIVE <span id="fps"></span></div>
+        <div class="tags"><div class="livebadge" id="liveTag" hidden><i></i>LIVE <span id="fps"></span></div><div class="modeltag" id="modelTag" hidden></div></div>
       </div>
     </div>
     <span id="imgName" hidden></span>
@@ -61,6 +61,6 @@
   </div>
 </div>
 <div class="drop" id="drop" hidden>Drop image to analyze</div>
-<script src="js/app.js?v=21"></script>
+<script src="js/app.js?v=26"></script>
 </body>
 </html>

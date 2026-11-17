@@ -137,7 +137,10 @@ function drawAnnotated(ctx,sc,opts){
   const vid=$("#video"),src=(S.live&&!opts.export&&vid.videoWidth)?vid:S.base;
   if(S.view.mask&&!opts.export){ctx.fillStyle="#0b1114";ctx.fillRect(0,0,W,H);ctx.globalAlpha=0.35;ctx.drawImage(src,0,0,W,H);ctx.globalAlpha=1;}
   else ctx.drawImage(src,0,0,W,H);
-  if(S.outline&&(S.view.outline||S.view.mask))ctx.drawImage(S.outline,0,0);
+  if(S.boxMode&&S.view.outline){
+    ctx.lineWidth=Math.max(2,Math.round(Math.max(W,H)/450));
+    for(const p of S.parts){const c=CLS[p.cls];ctx.strokeStyle=p.excl?EXCL:(c?c.color:"#9aa3a9");ctx.strokeRect(p.minx+0.5,p.miny+0.5,p.maxx-p.minx,p.maxy-p.miny);}
+  }else if(S.outline&&(S.view.outline||S.view.mask))ctx.drawImage(S.outline,0,0);
   if(S.view.ids||opts.export){
     // Label on each particle: number, class and the model's confidence, e.g. "3 Fiber 87%".
     const fs=Math.max(12,Math.round(Math.max(W,H)/50)),padX=Math.round(fs*0.35),h=Math.round(fs*1.35);
@@ -209,7 +212,7 @@ function loadFrom(src,w,h,name,example,maxDim){
   const max=maxDim||1600,sc=Math.min(1,max/Math.max(w,h)),W=Math.max(1,Math.round(w*sc)),H=Math.max(1,Math.round(h*sc));
   const c=document.createElement("canvas");c.width=W;c.height=H;const x=c.getContext("2d",{willReadFrequently:true});x.drawImage(src,0,0,W,H);
   S.base=c;S.W=W;S.H=H;S.rgba=x.getImageData(0,0,W,H).data;S.scale=w/W;S.origW=w;S.origH=h;S.name=name;S.example=example;
-  $("#imgName").textContent=name;view.hidden=false;$("#stage").hidden=false;
+  $("#imgName").textContent=name;view.hidden=false;$("#stage").hidden=false;showModelTag(MODEL_URL);
   if(!S.live){
     // Show the photo straight away; outlines and counts appear when the analysis finishes.
     S.parts=[];S.lab=null;S.labIdx=null;S.sel=-1;
@@ -416,6 +419,11 @@ async function loadModel(url){
   }
 }
 // Load the model once at startup; analysis waits for it.
+// Model name at the top right of the viewer (e.g. "YOLOv8s"), shown once an image is uploaded or Live starts.
+function showModelTag(file){
+  const nm=String(file).split("/").pop().replace(/\.onnx$/i,"").replace(/^yolov?(\d+)/i,(m,v)=>v==="11"?"YOLO11":"YOLOv"+v);
+  const t=$("#modelTag");if(t){t.textContent=nm;t.hidden=false;}
+}
 M.ready=loadModel(MODEL_URL);
 // Re-open a photo that was waiting when the page switched to compatibility mode.
 try{const pend=sessionStorage.getItem("microscan-pending");if(pend){const nm=sessionStorage.getItem("microscan-pending-name")||"Image";
@@ -429,6 +437,19 @@ try{indexedDB.deleteDatabase("microplastic-bench");}catch(e){}
 // One model run at a time: a new run (e.g. Freeze or Upload during live) waits for the current one.
 let runChain=Promise.resolve();
 function runModel(sess,feeds){const p=runChain.then(()=>sess.run(feeds));runChain=p.catch(()=>{});return p;}
+// Size, shape and colour of a detection box, in image pixels.
+function boxFeatures(b,L,r,padL,padT){
+  const {W,H,rgba}=S;
+  const x1=clamp((b.x1-padL)/r,0,W),y1=clamp((b.y1-padT)/r,0,H),x2=clamp((b.x2-padL)/r,0,W),y2=clamp((b.y2-padT)/r,0,H);
+  const w=Math.max(1,x2-x1),h=Math.max(1,y2-y1),fmax=Math.max(w,h),fmin=Math.min(w,h),area=w*h;
+  let sr=0,sg=0,sb=0,n=0;const step=Math.max(1,Math.floor(Math.min(w,h)/12));
+  for(let y=Math.floor(y1+h*0.25);y<y1+h*0.75;y+=step)for(let x=Math.floor(x1+w*0.25);x<x1+w*0.75;x+=step){const k=(Math.min(H-1,y)*W+Math.min(W-1,x))*4;sr+=rgba[k];sg+=rgba[k+1];sb+=rgba[k+2];n++;}
+  n=n||1;
+  return{L,n:area,filled:area,holes:0,cx:x1+w/2,cy:y1+h/2,minx:Math.floor(x1),miny:Math.floor(y1),maxx:Math.ceil(x2)-1,maxy:Math.ceil(y2)-1,
+    edge:x1<=0||y1<=0||x2>=W||y2>=H,perim:2*(w+h),fmax,fmin,ar:fmax/fmin,curv:fmax,fiberIdx:fmax*fmax/area,
+    circ:Math.min(1,4*Math.PI*area/(4*(w+h)*(w+h))),solidity:1,roundness:Math.min(1,4*area/(Math.PI*fmax*fmax)),holeFrac:0,
+    meanD:0,contrast:0,texture:0,rgb:[sr/n,sg/n,sb/n].map(Math.round),color:colorName(sr/n,sg/n,sb/n,S.set.mode),override:null,manualExcl:null};
+}
 async function analyzeYolo(){
   const tok=++M.tok,t0=performance.now();
   const {W,H}=S,sz=M.imgsz,r=Math.min(sz/W,sz/H),nw=Math.round(W*r),nh=Math.round(H*r);
@@ -439,8 +460,8 @@ async function analyzeYolo(){
   for(let i=0,j=0;i<N;i++,j+=4){f[i]=px[j]/255;f[i+N]=px[j+1]/255;f[i+2*N]=px[j+2]/255;}
   const sess=M.session;
   const feeds={[sess.inputNames[0]]:new ort.Tensor("float32",f,[1,3,sz,sz])};
-  let out;
-  try{out=await withTimeout(runModel(sess,feeds),45000,"Detection");}
+  let out;const tRun=performance.now();
+  try{out=await withTimeout(runModel(sess,feeds),45000,"Detection");M.lastRunMs=Math.round(performance.now()-tRun);}
   catch(e){
     if(M.backend!=="gpu"){if(!SAFE&&/took too long/.test(e.message)){enterSafeMode(e.message);return;}throw e;}
     // The graphics card failed on this computer: switch to the processor for the rest of the session and retry.
@@ -485,14 +506,17 @@ async function analyzeYolo(){
   const start=new Int32Array(nL+2);for(let L=1;L<=nL+1;L++)start[L]=start[L-1]+cnt[L-1];
   const q=new Int32Array(start[nL]+cnt[nL]),fillp=start.slice();for(let i=0;i<lab.length;i++){const L=lab[i];if(L)q[fillp[L]++]=i;}
   const dz=new Uint8Array(W*H),umPx=S.umPerPx*S.scale,parts=[];
-  for(let L=1;L<=nL;L++){if(!cnt[L])continue;const b=keep[L-1];
-    const p=features({L,start:start[L],end:start[L]+cnt[L],maxd:0},lab,q,dz,umPx);p.modelCls="m"+b.k;p.score=b.s;p.color=p.color;parts.push(p);}
+  for(let L=1;L<=nL;L++){const b=keep[L-1];let p;
+    if(!seg)p=boxFeatures(b,L,r,padL,padT);           // boxes: measure the box itself (no pixels can be "used up" by an overlapping box)
+    else{if(!cnt[L])continue;p=features({L,start:start[L],end:start[L]+cnt[L],maxd:0},lab,q,dz,umPx);}
+    p.modelCls="m"+b.k;p.score=b.s;parts.push(p);}
   const labIdx=new Int32Array(nL+1).fill(-1);
   const band=Math.max(40,H/8);
   parts.sort((a,b)=>(Math.floor(a.cy/band)-Math.floor(b.cy/band))||(a.cx-b.cx));
   parts.forEach((p,i)=>{p.id=i+1;labIdx[p.L]=i;});
-  S.d=dz;S.lab=lab;S.labIdx=labIdx;S.parts=parts;S.sel=-1;S.T={hi:0,lo:0};
+  S.d=dz;S.lab=lab;S.labIdx=labIdx;S.parts=parts;S.sel=-1;S.T={hi:0,lo:0};S.boxMode=!seg;
   classifyAll();S.ms=Math.round(performance.now()-t0);refresh(true);
+  if(!S.live)console.info(`Analysis took ${S.ms} ms (model ${M.lastRunMs} ms, ${M.backend==="gpu"?"graphics card":ort.env.wasm.numThreads+" thread"+(ort.env.wasm.numThreads>1?"s":"")}).`);
 }
 
 /* ---------- live detection ---------- */
@@ -529,7 +553,7 @@ async function startLive(deviceId){
     if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}
     stream=await openCamera(deviceId||savedCam());
     const v=$("#video");v.srcObject=stream;await v.play();
-    S.live=true;S.example=false;$("#liveTag").hidden=false;$("#liveCtl").hidden=false;$("#btnLive").classList.replace("primary","stop");$("#btnLive").innerHTML=STOP_BTN;
+    S.live=true;S.example=false;$("#liveTag").hidden=false;showModelTag(MODEL_URL);$("#liveCtl").hidden=false;$("#btnLive").classList.replace("primary","stop");$("#btnLive").innerHTML=STOP_BTN;
     cancelAnimationFrame(liveRaf);liveRaf=requestAnimationFrame(liveDraw);
     // Camera menu: lists every camera (built-in, USB, microscope) once access is allowed; the choice is remembered.
     try{const devs=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==="videoinput");const sel=$("#camSel");const cur=stream.getVideoTracks()[0]?.getSettings().deviceId;
