@@ -201,6 +201,7 @@ function refresh(rebuild){
   const u=S.umPerPx*S.scale;
   if(S.base){const inc=included(),cnt={};for(const k in CLS)cnt[k]=0;for(const p of inc)cnt[p.cls]++;
     $("#readout").innerHTML=`<div class="total"><b>${inc.length}</b><span>${inc.length===1?"particle":"particles"}</span></div><ul>${Object.entries(CLS).filter(([k])=>Object.keys(CLS).length<=6||cnt[k]>0).map(([k,v])=>`<li><i style="background:${v.color}"></i>${v.name}<b>${cnt[k]}</b></li>`).join("")}</ul>`;
+    {const tt=$("#timeTag");if(tt){tt.hidden=!(S.ms>0);tt.textContent=S.ms>0?(S.ms/1000).toFixed(2)+" s":"";}}
     $("#fps").textContent="";}
   const has=!!S.base&&!S.live;
   $("#btnSave").hidden=!(has&&M.session);
@@ -264,8 +265,8 @@ const ORT_BASE=new URL("vendor/onnxruntime-web/",location.href).href;
 const MODEL_URL="model/yolov8s.onnx";
 const NAMED={fiber:"#ff2e88",fibre:"#ff2e88",filament:"#b18cff",film:"#29d3f0",fragment:"#ffb020",granule:"#9be15d",pellet:"#9be15d",bead:"#9be15d",foam:"#ff7a45",microbead:"#9be15d"};
 const PALETTE=["#ff2e88","#ffb020","#29d3f0","#9be15d","#b18cff","#ff7a45","#4dabf7","#f783ac","#ffd43b","#69db7c","#e599f7","#63e6be"];
-// conf: minimum confidence for a detection (0.25 = YOLO default). iou: overlap for merging duplicates.
-const M={ready:null,loadPct:0,session:null,name:"",task:"detect",names:[],imgsz:640,conf:0.25,iou:0.45,tok:0,lb:null};
+// conf: minimum confidence for a detection (0.20; YOLO default is 0.25). iou: overlap for merging duplicates.
+const M={ready:null,loadPct:0,session:null,name:"",task:"detect",names:[],imgsz:640,conf:0.20,iou:0.45,tok:0,lb:null};
 // Processor with several cores by default (graphics card only with ?gpu=1); one core in compatibility mode.
 // when the page is cross-origin isolated (the server sends the COOP/COEP headers, see vercel.json).
 let WANT_GPU=false;

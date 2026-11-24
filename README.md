@@ -120,7 +120,7 @@ Class names and input size are read from the file.
 ## Settings to check (in `js/app.js`)
 
 - `umPerPx: 3.5` in the `S` object: micrometres per pixel of your camera. Sizes are wrong until this matches your setup.
-- `M.conf`: minimum confidence for a detection (0.25). Lower finds more particles but adds false detections; higher misses more.
+- `M.conf`: minimum confidence for a detection (0.20). Lower finds more particles but adds false detections; higher misses more.
 - `M.iou`: overlap above which duplicate detections are merged (0.45).
 - `NAMED`: colour for each class name.
 
